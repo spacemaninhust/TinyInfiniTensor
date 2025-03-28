@@ -57,6 +57,7 @@ namespace infini
         {
             IT_ASSERT(size() == dataVector.size());
             IT_ASSERT(DataType::get<T>() == dtype.cpuTypeInt());
+            std::cout << getRawDataPtr<T *>() << std::endl;
             return equalDataImpl(getRawDataPtr<T *>(), dataVector.data(), size());
         }
 

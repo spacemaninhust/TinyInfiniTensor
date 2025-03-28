@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <numeric>
 #include <queue>
-
+#include "operators/matmul.h"
 namespace infini
 {
 
@@ -106,6 +106,91 @@ namespace infini
         // 1. 去除冗余的算子（例如，两个相邻的算子都是 transpose 算子，且做的是相反的操作，可以将其全部删除）
         // 2. 合并算子（例如，矩阵乘算子中含有属性transA、transB，如果其输入存在transpose，且对最后两个维度做交换，就可以将transpose融入到矩阵乘算子的属性中去）
         // =================================== 作业 ===================================
+        
+        for (auto it = ops.begin(); it != ops.end(); )
+        {
+            auto op = *it;
+            // 1. 去除冗余的算子
+            if(!op) {
+                it = ops.erase(it);
+                continue;
+            }
+            if (op->getOpType() == OpType::Transpose)
+            {
+                auto input = op->getInputs()[0];
+                auto output = op->getOutput();
+                if (input->getTargets().size() == 1 && output->getSource()->getOpType() == OpType::Transpose)
+                {
+                    auto nextOp = output->getTargets()[0];
+                    auto nextInput = nextOp->getInputs()[0];
+                    auto nextOutput = nextOp->getOutput();
+                    if (nextInput == output)
+                    {
+                        input->removeTarget(op);
+                        output->setSource(nullptr);
+                        nextInput->removeTarget(nextOp);
+                        nextOutput->setSource(nullptr);
+                        for (auto &pred: op->getPredecessors()) {
+                            pred->removeSuccessors(op);
+                        }
+                        for (auto &succ: op->getSuccessors()) {
+                            succ->removePredecessors(op);
+                        }
+                        for (auto &pred: nextOp->getPredecessors()) {
+                            pred->removeSuccessors(nextOp);
+                        }
+                        for (auto &succ: nextOp->getSuccessors()) {
+                            succ->removePredecessors(nextOp);
+                            succ->replaceInput(nextOutput, input);
+                            input->addTarget(succ);
+                        }
+                        it = ops.erase(it);
+                        it = ops.erase(std::find(ops.begin(), ops.end(), nextOp));
+                        this->removeTensor(output);
+                        this->removeTensor(nextOutput);
+                        continue;
+                    }
+                }
+            } 
+            // 2. 合并算子
+            else if (op->getOpType() == OpType::MatMul) {
+                auto op_ = as<MatmulObj>(op);
+                auto inputs = op_->getInputs();
+                if (inputs.size() == 2) {
+                    auto output = op_->getOutput();
+                    for(auto input: inputs) {
+                        if (input->getSource() && input->getSource()->getOpType() == OpType::Transpose) {
+                            auto transposeOp = input->getSource();
+                            auto transposeInput = transposeOp->getInputs()[0];
+                            auto transposeOutput = transposeOp->getOutput();
+                            if(transposeOutput == input) {
+                                input->removeTarget(op_);
+                                input->setSource(nullptr);
+                                transposeInput->removeTarget(transposeOp);
+                                transposeOutput->setSource(nullptr);
+                                for (auto &pred: transposeOp->getPredecessors()) {
+                                    pred->removeSuccessors(transposeOp);
+                                }
+                                for (auto &succ: transposeOp->getSuccessors()) {
+                                    succ->removePredecessors(transposeOp);
+                                }
+                                it = ops.erase(std::find(ops.begin(), ops.end(), transposeOp));
+                                op_->replaceInput(input, transposeInput);
+                                transposeInput->setSource(op_);
+                                this->removeTensor(input);
+                                if(input == inputs[0]) {
+                                    op_->setTransA(true);
+                                } else {
+                                    op_->setTransB(true);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            it++;
+        }
     }
 
     Tensor GraphObj::getTensor(int fuid) const
@@ -147,12 +232,22 @@ namespace infini
     {
         // topological sorting first
         IT_ASSERT(topo_sort() == true);
-
         // =================================== 作业 ===================================
         // TODO：利用 allocator 给计算图分配内存
         // HINT: 获取分配好的内存指针后，可以调用 tensor 的 setDataBlob 函数给 tensor 绑定内存
         // =================================== 作业 ===================================
-
+        vector<size_t> offsets;
+        for(auto &tensor : tensors) {
+            size_t bytes = tensor->getBytes();
+            offsets.push_back(allocator.alloc(bytes));
+        }
+        void *ptr = allocator.getPtr();
+        for(auto &tensor : tensors) {
+            size_t offset = offsets.front();
+            offsets.erase(offsets.begin());
+            void *_ptr = (char *)ptr + offset;
+            tensor->setDataBlob(make_ref<BlobObj>(runtime, _ptr));
+        }
         allocator.info();
     }
 

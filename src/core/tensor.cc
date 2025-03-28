@@ -24,10 +24,12 @@ namespace infini {
                      ", dtype " + dtype.toString() + ", " + runtime->toString() +
                      ", " + ss.str() + "\n";
         vector<UidBaseType> targetGuids;
-        for (const auto &op : targets)
+        for (const auto &op : targets) {
             targetGuids.emplace_back(op.lock()->getGuid());
-        if (auto o = source.lock())
+        }
+        if (auto o = source.lock()) {
             ret += ", source " + std::to_string(o->getGuid());
+        }
         else
             ret += ", source None";
         ret += ", targets " + vecToString(targetGuids);
